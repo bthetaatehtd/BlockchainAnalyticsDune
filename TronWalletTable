@@ -1,0 +1,93 @@
+-- ==================================================
+-- COINIFY LIQUIDITY MONITORING - USDT + TRX TRANSACTIONS
+-- Wallet: TSWSXCwELeQTHgXzJj8rFLhcaSVqZLaz8A
+-- Following the working pattern from your example
+-- ==================================================
+
+WITH params AS (
+  SELECT
+    from_tron_address('TSWSXCwELeQTHgXzJj8rFLhcaSVqZLaz8A') AS wallet
+),
+
+-- USDT transactions (both incoming and outgoing)
+usdt_transactions AS (
+  SELECT
+    evt_tx_hash,
+    evt_block_time,
+    "from" AS from_address,
+    "to"   AS to_address,
+    -- Positive for incoming, negative for outgoing
+    CASE 
+      WHEN "to" = (SELECT wallet FROM params) THEN value / 1e6   -- incoming
+      WHEN "from" = (SELECT wallet FROM params) THEN -value / 1e6 -- outgoing
+      ELSE 0
+    END AS amount,
+    'USDT' AS token,
+    CASE 
+      WHEN "to" = (SELECT wallet FROM params) THEN 'IN'
+      WHEN "from" = (SELECT wallet FROM params) THEN 'OUT'
+    END AS direction
+  FROM tether_tron.Tether_USD_evt_transfer
+  WHERE 
+    "to" = (SELECT wallet FROM params)
+    OR "from" = (SELECT wallet FROM params)
+),
+
+-- TRX native transactions (both incoming and outgoing)
+-- Using tron.transactions table as per Dune docs [citation:3]
+trx_transactions AS (
+  SELECT
+    hash AS evt_tx_hash,
+    block_time AS evt_block_time,
+    "from" AS from_address,
+    "to"   AS to_address,
+    -- Positive for incoming, negative for outgoing
+    -- TRX amount is in SUN (6 decimals), convert to TRX
+    CASE 
+      WHEN "to" = (SELECT wallet FROM params) THEN value / 1e6   -- incoming
+      WHEN "from" = (SELECT wallet FROM params) THEN -value / 1e6 -- outgoing
+      ELSE 0
+    END AS amount,
+    'TRX' AS token,
+    CASE 
+      WHEN "to" = (SELECT wallet FROM params) THEN 'IN'
+      WHEN "from" = (SELECT wallet FROM params) THEN 'OUT'
+    END AS direction
+  FROM tron.transactions
+  WHERE 
+    -- Only include value transfers (not contract deployments, etc.)
+    value > 0
+    AND (
+      "to" = (SELECT wallet FROM params)
+      OR "from" = (SELECT wallet FROM params)
+    )
+),
+
+-- Combine both transaction types
+all_transactions AS (
+  SELECT * FROM usdt_transactions
+  UNION ALL
+  SELECT * FROM trx_transactions
+)
+
+SELECT
+  to_hex(evt_tx_hash) AS txn_hash,
+  evt_block_time AS block_time,
+  -- Human-readable age
+  CASE
+    WHEN date_diff('second', evt_block_time, now()) < 60
+      THEN cast(date_diff('second', evt_block_time, now()) AS varchar) || ' secs ago'
+    WHEN date_diff('minute', evt_block_time, now()) < 60
+      THEN cast(date_diff('minute', evt_block_time, now()) AS varchar) || ' mins ago'
+    WHEN date_diff('hour', evt_block_time, now()) < 24
+      THEN cast(date_diff('hour', evt_block_time, now()) AS varchar) || ' hrs ago'
+    ELSE
+      cast(date_diff('day', evt_block_time, now()) AS varchar) || ' days ago'
+  END AS age,
+  to_tron_address(from_address) AS "from",
+  to_tron_address(to_address)   AS "to",
+  amount,
+  token,
+  direction
+FROM all_transactions
+ORDER BY evt_block_time DESC
