@@ -1,0 +1,35 @@
+WITH params AS (
+  SELECT
+    from_tron_address('TSWSXCwELeQTHgXzJj8rFLhcaSVqZLaz8A') AS wallet
+),
+
+usdt_outgoing AS (
+  SELECT
+    evt_block_time,
+    value / 1e6 AS usdt_amount
+  FROM tether_tron.Tether_USD_evt_transfer
+  WHERE "from" = (SELECT wallet FROM params)
+)
+
+SELECT
+  -- last 7 days
+  round(
+    sum(CASE WHEN evt_block_time >= now() - interval '7' day THEN usdt_amount ELSE 0 END),
+    2
+  ) AS usdt_out_7d,
+
+  sum(
+    CASE WHEN evt_block_time >= now() - interval '7' day THEN 1 ELSE 0 END
+  ) AS tx_count_7d,
+
+  -- last 30 days
+  round(
+    sum(CASE WHEN evt_block_time >= now() - interval '30' day THEN usdt_amount ELSE 0 END),
+    2
+  ) AS usdt_out_30d,
+
+  sum(
+    CASE WHEN evt_block_time >= now() - interval '30' day THEN 1 ELSE 0 END
+  ) AS tx_count_30d
+
+FROM usdt_outgoing
