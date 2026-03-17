@@ -1,0 +1,50 @@
+-- ==================================================
+-- COINIFY LIQUIDITY MONITORING - AVALANCHE USDC (FIXED)
+-- Wallet: 0xd4D81C00F886C22368aEd08Fc4c96E5db455eADd
+-- ==================================================
+
+WITH params AS (
+    -- Use from_hex and remove the '0x' from the string for the function
+    SELECT from_hex('0xd4D81C00F886C22368aEd08Fc4c96E5db455eADd') AS wallet
+),
+
+avalanche_usdc_transactions AS (
+    SELECT
+        evt_tx_hash,
+        evt_block_time,
+        "from" AS from_address,
+        "to"   AS to_address,
+        -- USDC on Avalanche has 6 decimals
+        CASE 
+            WHEN "to" = (SELECT wallet FROM params) THEN value / 1e6
+            WHEN "from" = (SELECT wallet FROM params) THEN -value / 1e6
+            ELSE 0
+        END AS amount,
+        'USDC' AS token,
+        CASE 
+            WHEN "to" = (SELECT wallet FROM params) THEN 'IN'
+            WHEN "from" = (SELECT wallet FROM params) THEN 'OUT'
+        END AS direction
+    FROM erc20_avalanche_c.evt_Transfer
+    WHERE 
+        contract_address = from_hex('b97ef9ef8734c71904d8002f8b6bc66dd9c48a6e') -- USDC Contract
+        AND ("to" = (SELECT wallet FROM params) OR "from" = (SELECT wallet FROM params))
+)
+
+SELECT
+    '0x' || cast(evt_tx_hash as varchar) AS txn_hash,
+    evt_block_time AS block_time,
+    CASE
+        WHEN date_diff('second', evt_block_time, now()) < 60 THEN cast(date_diff('second', evt_block_time, now()) AS varchar) || ' secs ago'
+        WHEN date_diff('minute', evt_block_time, now()) < 60 THEN cast(date_diff('minute', evt_block_time, now()) AS varchar) || ' mins ago'
+        WHEN date_diff('hour', evt_block_time, now()) < 24 THEN cast(date_diff('hour', evt_block_time, now()) AS varchar) || ' hrs ago'
+        ELSE cast(date_diff('day', evt_block_time, now()) AS varchar) || ' days ago'
+    END AS age,
+    '0x' || cast(from_address as varchar) AS "from",
+    '0x' || cast(to_address as varchar) AS "to",
+    amount,
+    token,
+    direction
+FROM avalanche_usdc_transactions
+ORDER BY evt_block_time DESC
+ORDER BY evt_block_time DESC
