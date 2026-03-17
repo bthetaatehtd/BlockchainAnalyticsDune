@@ -1,0 +1,55 @@
+-- ==================================================
+-- COINIFY LIQUIDITY MONITORING - SOLANA USDC
+-- Wallet: 9bDCVt2y8iqtzQRuR5HqiRMzkBHZ6vwfXrYnxwUvbiRz
+-- ==================================================
+
+WITH params AS (
+    SELECT '9bDCVt2y8iqtzQRuR5HqiRMzkBHZ6vwfXrYnxwUvbiRz' AS wallet
+),
+
+solana_usdc_transactions AS (
+    SELECT
+        tx_id AS evt_tx_hash,
+        block_time AS evt_block_time,
+        from_owner AS from_address,
+        to_owner AS to_address,
+        -- amount_display is already adjusted for USDC's 6 decimals
+        CASE 
+            WHEN to_owner = (SELECT wallet FROM params) THEN amount_display
+            WHEN from_owner = (SELECT wallet FROM params) THEN -amount_display
+            ELSE 0
+        END AS amount,
+        'USDC' AS token,
+        CASE 
+            WHEN to_owner = (SELECT wallet FROM params) THEN 'IN'
+            WHEN from_owner = (SELECT wallet FROM params) THEN 'OUT'
+        END AS direction
+    FROM tokens_solana.transfers
+    WHERE 
+        token_mint_address = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' -- USDC Mint
+        AND (to_owner = (SELECT wallet FROM params) OR from_owner = (SELECT wallet FROM params))
+        -- Standard Dune practice: filter by block_time for performance
+        AND block_time > now() - interval '90' day 
+)
+
+SELECT
+    evt_tx_hash AS txn_hash,
+    evt_block_time AS block_time,
+    -- Human-readable age
+    CASE
+        WHEN date_diff('second', evt_block_time, now()) < 60
+            THEN cast(date_diff('second', evt_block_time, now()) AS varchar) || ' secs ago'
+        WHEN date_diff('minute', evt_block_time, now()) < 60
+            THEN cast(date_diff('minute', evt_block_time, now()) AS varchar) || ' mins ago'
+        WHEN date_diff('hour', evt_block_time, now()) < 24
+            THEN cast(date_diff('hour', evt_block_time, now()) AS varchar) || ' hrs ago'
+        ELSE
+            cast(date_diff('day', evt_block_time, now()) AS varchar) || ' days ago'
+    END AS age,
+    from_address AS "from",
+    to_address AS "to",
+    amount,
+    token,
+    direction
+FROM solana_usdc_transactions
+ORDER BY evt_block_time DESC
