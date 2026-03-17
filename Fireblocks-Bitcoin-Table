@@ -1,0 +1,58 @@
+-- ==================================================
+-- COINIFY LIQUIDITY MONITORING - BITCOIN
+-- Wallets: bc1qez8kr7djkytqxr6vfgg9anzcrnwhxv9hn6aunm (SegWit)
+--          1KHTummZgtL8aemzzdMnMvkCBDuDBAu15J (Legacy)
+-- ==================================================
+
+WITH wallet_addresses AS (
+    SELECT 'bc1qez8kr7djkytqxr6vfgg9anzcrnwhxv9hn6aunm' AS addr
+    UNION ALL
+    SELECT '1KHTummZgtL8aemzzdMnMvkCBDuDBAu15J' AS addr
+),
+
+-- INCOMING: Address is found in the outputs
+incoming AS (
+    SELECT 
+        tx_id,
+        block_time,
+        'IN' AS direction,
+        value AS amount
+    FROM bitcoin.outputs
+    WHERE address IN (SELECT addr FROM wallet_addresses)
+),
+
+-- OUTGOING: Address is found in the inputs
+outgoing AS (
+    SELECT 
+        tx_id,
+        block_time,
+        'OUT' AS direction,
+        -value AS amount
+    FROM bitcoin.inputs
+    WHERE address IN (SELECT addr FROM wallet_addresses)
+),
+
+combined_activity AS (
+    SELECT * FROM incoming
+    UNION ALL
+    SELECT * FROM outgoing
+)
+
+SELECT
+    -- lower(to_hex()) gives a clean 64-char string ready for explorers
+    lower(to_hex(tx_id)) AS explorer_txid,
+    block_time,
+    -- Human-readable age
+    CASE
+        WHEN date_diff('second', block_time, now()) < 60 THEN cast(date_diff('second', block_time, now()) AS varchar) || ' secs ago'
+        WHEN date_diff('minute', block_time, now()) < 60 THEN cast(date_diff('minute', block_time, now()) AS varchar) || ' mins ago'
+        WHEN date_diff('hour', block_time, now()) < 24 THEN cast(date_diff('hour', block_time, now()) AS varchar) || ' hrs ago'
+        ELSE cast(date_diff('day', block_time, now()) AS varchar) || ' days ago'
+    END AS age,
+    amount,
+    'BTC' AS token,
+    direction
+FROM combined_activity
+WHERE block_time > now() - interval '90' day
+ORDER BY block_time DESC
+LIMIT 100
